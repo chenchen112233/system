@@ -1,23 +1,11 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>美容皮膚管理顧客系統</title>
-
-<!-- Firebase -->
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import {
-  getFirestore,
-  collection,
-  getDocs,
-  setDoc,
-  doc
-} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+  // 引入 Firebase 模組
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getDatabase, ref, push, set, onValue, remove, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCpyGKlPjdwi3zBvI2DsRpOaG5UE7s-7tQ",
+  // --- 請替換成您自己的 Firebase 配置 ---
+  const firebaseConfig = {
+   apiKey: "AIzaSyCpyGKlPjdwi3zBvI2DsRpOaG5UE7s-7tQ",
   authDomain: "system-6e82f.firebaseapp.com",
   projectId: "system-6e82f",
   storageBucket: "system-6e82f.appspot.com",
@@ -25,191 +13,248 @@ const firebaseConfig = {
   appId: "1:435886614335:web:ca493fc81d8d718208d58a"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+  // 初始化 Firebase
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const customersRef = ref(db, 'customers');
 
-// 給下面主程式用
-window.db = db;
-window.collection = collection;
-window.getDocs = getDocs;
-window.setDoc = setDoc;
-window.doc = doc;
-</script>
+  // 全域變數
+  let customers = {}; // 改用物件儲存，Key 為 Firebase 的 UID
+  let currentId = null;
 
-<style>
-/*（你的 CSS 原樣保留，為了不干擾功能我沒有改）*/
-:root {
-  --bg-color:#F7F4EF;--card-bg:#FFF;--text-main:#5D4037;
-  --text-light:#8D6E63;--accent-color:#D7CCC8;--primary-btn:#8D6E63;
-}
-*{box-sizing:border-box}
-body{margin:0;font-family:"PingFang TC","Noto Sans TC",sans-serif;background:var(--bg-color);color:var(--text-main);overflow:hidden}
-.view{position:absolute;top:0;left:0;width:100%;height:100%;padding:20px;overflow-y:auto}
-.hidden{display:none}
-.customer-card{background:#FFF;border-radius:16px;padding:15px;margin-bottom:10px;display:flex;justify-content:space-between;cursor:pointer}
-.fab-btn{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--primary-btn);color:#fff;padding:15px 30px;border-radius:50px;border:none}
-.record-item{border-left:3px solid var(--accent-color);padding-left:10px;margin-bottom:10px;position:relative}
-.delete-record{position:absolute;right:0;top:0;color:red;cursor:pointer}
-.toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#000;color:#fff;padding:10px 20px;border-radius:8px;display:none}
-</style>
-</head>
-
-<body>
-
-<div id="home-view" class="view">
-  <h2 style="text-align:center">顧客資料管理</h2>
-  <input id="searchInput" placeholder="搜尋顧客" oninput="renderList()" style="width:100%;padding:10px">
-  <div id="customerList"></div>
-  <button class="fab-btn" onclick="openEditor()">＋ 新增顧客</button>
-</div>
-
-<div id="editor-view" class="view hidden">
-  <button onclick="goHome()">← 返回</button>
-  <input id="custName" placeholder="姓名">
-  <input id="tel" placeholder="電話">
-  <input type="date" id="consultDate">
-  <button onclick="saveCustomer()">儲存</button>
-
-  <h3>課程紀錄</h3>
-  <input id="recTitle" placeholder="課程名稱">
-  <input type="date" id="recDate">
-  <input id="recContent" placeholder="內容">
-  <button onclick="addRecordItem()">＋ 新增紀錄</button>
-  <div id="recordsContainer"></div>
-</div>
-
-<div id="toast" class="toast"></div>
-
-<script type="module">
-/* ===== DOM ===== */
-const homeView = document.getElementById('home-view');
-const editorView = document.getElementById('editor-view');
-const customerList = document.getElementById('customerList');
-const searchInput = document.getElementById('searchInput');
-const toast = document.getElementById('toast');
-
-let customers = [];
-let currentId = null;
-
-/* ===== Init ===== */
-async function init(){
-  customers=[];
-  const snap = await getDocs(collection(db,"customers"));
-  snap.forEach(d=>customers.push(d.data()));
-  renderList();
-  recDate.value=new Date().toISOString().split('T')[0];
-}
-
-/* ===== List ===== */
-function renderList(){
-  customerList.innerHTML='';
-  customers
-    .filter(c=>c.name.includes(searchInput.value))
-    .sort((a,b)=>b.updatedAt-a.updatedAt)
-    .forEach(c=>{
-      const div=document.createElement('div');
-      div.className='customer-card';
-      div.innerHTML=`<div>${c.name}<br>${c.tel||''}</div><div>›</div>`;
-      div.onclick=()=>openEditor(c.id);
-      customerList.appendChild(div);
+  // 初始化：監聽資料庫變化
+  function init() {
+    onValue(customersRef, (snapshot) => {
+      const data = snapshot.val();
+      customers = data || {};
+      renderList();
     });
-}
+    
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('recDate').value = today;
+  }
 
-/* ===== Editor ===== */
-function openEditor(id=null){
-  homeView.classList.add('hidden');
-  editorView.classList.remove('hidden');
-  currentId=id;
-  clearForm();
-  if(id){
-    const d=customers.find(c=>c.id===id);
-    if(d){
-      custName.value=d.name;
-      tel.value=d.tel;
-      consultDate.value=d.consultDate||'';
-      if(d.records) d.records.forEach(r=>renderRecordItem(r));
+  // 渲染列表 (將物件轉為陣列進行過濾與排序)
+  window.renderList = function() {
+    const query = document.getElementById('searchInput').value.trim();
+    const container = document.getElementById('customerList');
+    container.innerHTML = '';
+
+    // 將物件轉換為陣列以便處理
+    let customerArray = Object.keys(customers).map(key => ({
+      ...customers[key],
+      id: key
+    }));
+
+    const filtered = customerArray.filter(c => c.name.includes(query));
+
+    if (filtered.length === 0) {
+      container.innerHTML = '<div style="text-align:center; color:#ccc; margin-top:30px;">查無資料</div>';
+      return;
+    }
+
+    // 按更新時間排序
+    filtered.sort((a, b) => b.updatedAt - a.updatedAt);
+
+    filtered.forEach(c => {
+      const div = document.createElement('div');
+      div.className = 'customer-card';
+      div.innerHTML = `
+          <div>
+              <div class="c-name">${c.name}</div>
+              <div class="c-phone">${c.tel || '未填電話'}</div>
+          </div>
+          <div style="font-size:20px; color:#D7CCC8;">›</div>
+      `;
+      div.onclick = () => openEditor(c.id);
+      container.appendChild(div);
+    });
+  }
+
+  // 儲存資料到 Firebase
+  window.saveCustomer = function() {
+    const name = document.getElementById('custName').value.trim();
+    if (!name) { alert('請填寫姓名'); return; }
+
+    const customerData = {
+      updatedAt: Date.now(),
+      name: name,
+      consultDate: document.getElementById('consultDate').value,
+      counselor: document.getElementById('counselor').value,
+      gender: getRadio('gender'),
+      birthday: document.getElementById('birthday').value,
+      tel: document.getElementById('tel').value,
+      skinType: getRadio('skinType'),
+      drugAllergy: getRadio('drugAllergy'),
+      allergens: document.getElementById('allergens').value,
+      howLong: getRadio('howLong'),
+      sleep: getRadio('sleep'),
+      historyOtherText: document.getElementById('historyOtherText').value,
+      issues: getCheckboxes('.issue-cb'),
+      history: getCheckboxes('.history-cb'),
+      diet: getCheckboxes('.diet-cb'),
+      records: getRecordsFromUI()
+    };
+
+    if (currentId) {
+      // 更新現有資料
+      update(ref(db, `customers/${currentId}`), customerData)
+        .then(() => {
+          showToast('更新成功');
+          goHome();
+        });
+    } else {
+      // 新增資料
+      push(customersRef, customerData)
+        .then(() => {
+          showToast('儲存成功');
+          goHome();
+        });
     }
   }
-}
 
-function goHome(){
-  editorView.classList.add('hidden');
-  homeView.classList.remove('hidden');
-  renderList();
-}
+  // 從 UI 獲取紀錄
+  function getRecordsFromUI() {
+    let recs = [];
+    document.querySelectorAll('.record-item').forEach(item => {
+      recs.push({
+        title: item.dataset.title,
+        date: item.dataset.date,
+        content: item.dataset.content,
+        amount: item.dataset.amount,
+        operator: item.dataset.operator
+      });
+    });
+    return recs.sort((a, b) => new Date(b.date) - new Date(a.date));
+  }
 
-function clearForm(){
-  custName.value='';
-  tel.value='';
-  consultDate.value='';
-  recordsContainer.innerHTML='';
-}
+  // 開啟編輯器
+  window.openEditor = function(id = null) {
+    document.getElementById('home-view').style.display = 'none';
+    const editor = document.getElementById('editor-view');
+    editor.style.display = 'flex';
+    setTimeout(() => editor.classList.remove('hidden'), 10);
+    
+    currentId = id;
+    clearForm();
+    
+    if (id && customers[id]) {
+      loadDataToForm(customers[id]);
+    }
+  }
 
-/* ===== Records ===== */
-function addRecordItem(){
-  const r={
-    title:recTitle.value,
-    date:recDate.value,
-    content:recContent.value
-  };
-  renderRecordItem(r,true);
-  recTitle.value='';
-  recContent.value='';
-}
+  // 輔助函式：取得 Checkbox 值
+  function getCheckboxes(selector) {
+    return Array.from(document.querySelectorAll(selector + ':checked')).map(cb => cb.value);
+  }
 
-function renderRecordItem(r,newItem=false){
-  const div=document.createElement('div');
-  div.className='record-item';
-  div.dataset.title=r.title||'';
-  div.dataset.date=r.date||'';
-  div.dataset.content=r.content||'';
-  div.innerHTML=`
-    <div class="delete-record" onclick="this.parentElement.remove()">✕</div>
-    <b>${r.title}</b><br>${r.date}<br>${r.content}
-  `;
-  recordsContainer[newItem?'prepend':'append'](div);
-}
+  // 輔助函式：取得 Radio 值
+  function getRadio(name) {
+    return document.querySelector(`input[name="${name}"]:checked`)?.value || "";
+  }
 
-function getRecords(){
-  return [...document.querySelectorAll('.record-item')].map(i=>({
-    title:i.dataset.title,
-    date:i.dataset.date,
-    content:i.dataset.content
-  }));
-}
+  // --- 以下保留您原本的 UI 邏輯功能，但確保它們能與上方的 Firebase 邏輯配合 ---
+  window.goHome = function() {
+    document.getElementById('home-view').style.display = 'flex';
+    document.getElementById('editor-view').classList.add('hidden');
+    setTimeout(() => document.getElementById('editor-view').style.display = 'none', 300);
+  }
 
-/* ===== Save ===== */
-async function saveCustomer(){
-  if(!custName.value.trim()) return alert('請填姓名');
-  const id=currentId||Date.now().toString();
-  const data={
-    id,
-    updatedAt:Date.now(),
-    name:custName.value,
-    tel:tel.value,
-    consultDate:consultDate.value,
-    records:getRecords()
-  };
-  await setDoc(doc(db,"customers",id),data);
-  showToast('雲端儲存成功');
-  setTimeout(goHome,800);
-}
+  window.switchTab = function(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    const btns = document.querySelectorAll('.tab-btn');
+    if(tabId === 'tab-info') btns[0].classList.add('active');
+    else btns[1].classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+  }
 
-/* ===== UI ===== */
-function showToast(msg){
-  toast.innerText=msg;
-  toast.style.display='block';
-  setTimeout(()=>toast.style.display='none',2000);
-}
+  function clearForm() {
+    document.querySelectorAll('#editor-view input').forEach(i => {
+      if(i.type === 'radio' || i.type === 'checkbox') i.checked = false;
+      else if(i.id !== 'recDate') i.value = '';
+    });
+    document.getElementById('recordsContainer').innerHTML = '';
+    switchTab('tab-info');
+  }
 
-/* expose */
-window.openEditor=openEditor;
-window.saveCustomer=saveCustomer;
-window.renderList=renderList;
-window.goHome=goHome;
-window.addRecordItem=addRecordItem;
+  function loadDataToForm(data) {
+    document.getElementById('consultDate').value = data.consultDate || '';
+    document.getElementById('counselor').value = data.counselor || '';
+    document.getElementById('custName').value = data.name || '';
+    document.getElementById('birthday').value = data.birthday || '';
+    document.getElementById('tel').value = data.tel || '';
+    document.getElementById('allergens').value = data.allergens || '';
+    document.getElementById('historyOtherText').value = data.historyOtherText || '';
 
-init();
+    setRadio('gender', data.gender);
+    setRadio('skinType', data.skinType);
+    setRadio('drugAllergy', data.drugAllergy);
+    setRadio('howLong', data.howLong);
+    setRadio('sleep', data.sleep);
+
+    loadCheckboxes('.issue-cb', data.issues);
+    loadCheckboxes('.history-cb', data.history);
+    loadCheckboxes('.diet-cb', data.diet);
+
+    if (data.records) {
+      data.records.forEach(r => renderRecordItem(r));
+    }
+  }
+
+  function setRadio(name, value) {
+    if (!value) return;
+    const radios = document.getElementsByName(name);
+    for (let r of radios) { if (r.value === value) r.checked = true; }
+  }
+
+  function loadCheckboxes(selector, dataArray) {
+    if (!dataArray) return;
+    document.querySelectorAll(selector).forEach(cb => {
+      if (dataArray.includes(cb.value)) cb.checked = true;
+    });
+  }
+
+  window.addRecordItem = function() {
+    const title = document.getElementById('recTitle').value;
+    const date = document.getElementById('recDate').value;
+    const content = document.getElementById('recContent').value;
+    const amount = document.getElementById('recAmount').value;
+    const operator = document.getElementById('recOperator').value;
+    if (!title && !content) { alert('請填寫課程名稱或內容'); return; }
+    renderRecordItem({ title, date, content, amount, operator }, true);
+    document.getElementById('recTitle').value = '';
+    document.getElementById('recContent').value = '';
+    document.getElementById('recAmount').value = '';
+  }
+
+  function renderRecordItem(r, isNew = false) {
+    const container = document.getElementById('recordsContainer');
+    const div = document.createElement('div');
+    div.className = 'record-item';
+    div.dataset.title = r.title || '';
+    div.dataset.date = r.date || '';
+    div.dataset.content = r.content || '';
+    div.dataset.amount = r.amount || '';
+    div.dataset.operator = r.operator || '';
+    div.innerHTML = `
+        <div class="delete-record" onclick="this.parentElement.remove()">✕ 刪除</div>
+        <div class="record-title">${r.title || '無標題'}</div>
+        <div class="record-date">${r.date}</div>
+        <div class="record-content">${r.content}</div>
+        <div class="record-meta">金額: $${r.amount || 0} / 操作: ${r.operator || '-'}</div>
+    `;
+    if (isNew) container.prepend(div);
+    else container.appendChild(div);
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.innerText = msg;
+    t.style.display = 'block';
+    setTimeout(() => t.style.display = 'none', 2000);
+  }
+
+  // 啟動程式
+  init();
 </script>
-</body>
-</html>
